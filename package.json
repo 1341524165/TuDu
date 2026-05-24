@@ -7,7 +7,7 @@
     "dev:proxy": "NODE_OPTIONS=\"${NODE_OPTIONS:+$NODE_OPTIONS }--use-env-proxy\" HTTP_PROXY=http://127.0.0.1:7897 HTTPS_PROXY=http://127.0.0.1:7897 ALL_PROXY=http://127.0.0.1:7897 http_proxy=http://127.0.0.1:7897 https_proxy=http://127.0.0.1:7897 all_proxy=http://127.0.0.1:7897 npm run dev",
     "build": "next build",
     "start": "next start -H 0.0.0.0",
-    "lint": "next lint"
+    "lint": "eslint"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

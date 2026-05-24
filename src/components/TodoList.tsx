@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate } from '@/app/actions';
 
 const premiumColors = [
@@ -12,6 +12,11 @@ const premiumColors = [
   '#22d3ee', // Cyan
 ];
 
+const getDefaultCategoryId = (categories: Category[]) => {
+  const inbox = categories.find(c => c.name === 'Inbox');
+  return inbox ? inbox.id : categories[0]?.id ?? null;
+};
+
 export default function TodoList({ 
   initialTasks, 
   initialCategories 
@@ -22,8 +27,9 @@ export default function TodoList({
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
   
-  const [newTaskCategoryId, setNewTaskCategoryId] = useState<number | null>(null);
+  const [newTaskCategoryId, setNewTaskCategoryId] = useState<number | null>(() => getDefaultCategoryId(initialCategories));
   const [selectedFilterCategoryId, setSelectedFilterCategoryId] = useState<number | null>(null);
   const [isManageDrawerOpen, setIsManageDrawerOpen] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState('');
@@ -79,37 +85,29 @@ export default function TodoList({
       return;
     }
 
-    // Optimistic update
+    const previousTasks = tasks;
+    setActionError(null);
     setTasks(tasks.map(t => t.id === id ? { ...t, title: trimmedTitle, dueDate: newDueDate } : t));
     setEditingTaskId(null);
     setEditingTaskText('');
     setEditingTaskDueDate('');
 
     if (currentTask.title !== trimmedTitle) {
-      await updateTaskTitle(id, trimmedTitle);
+      const result = await updateTaskTitle(id, trimmedTitle);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+        return;
+      }
     }
     if (currentTask.dueDate !== newDueDate) {
-      await updateTaskDueDate(id, newDueDate);
+      const result = await updateTaskDueDate(id, newDueDate);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+      }
     }
   };
-
-
-  // Sync state with server-side props
-  useEffect(() => {
-    setTasks(initialTasks);
-  }, [initialTasks]);
-
-  useEffect(() => {
-    setCategories(initialCategories);
-  }, [initialCategories]);
-
-  // Initialize new task category ID once categories load
-  useEffect(() => {
-    if (newTaskCategoryId === null && categories.length > 0) {
-      const inbox = categories.find(c => c.name === 'Inbox');
-      setNewTaskCategoryId(inbox ? inbox.id : categories[0].id);
-    }
-  }, [categories, newTaskCategoryId]);
 
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -117,12 +115,14 @@ export default function TodoList({
     
     const selectedCat = categories.find(c => c.id === newTaskCategoryId);
     const dueDate = newTaskDueDate || null;
+    const title = newTaskTitle.trim();
+    const previousTasks = tasks;
+    setActionError(null);
     
-    // Optimistic update
     const tempId = Math.random();
     const newTask: Task = {
       id: tempId,
-      title: newTaskTitle.trim(),
+      title,
       completed: false,
       createdAt: new Date().toISOString(),
       categoryId: newTaskCategoryId,
@@ -135,12 +135,19 @@ export default function TodoList({
     setNewTaskTitle('');
     setNewTaskDueDate('');
     
-    // Server action
-    await addTask(newTask.title, newTask.categoryId, newTask.dueDate);
+    const result = await addTask(newTask.title, newTask.categoryId, newTask.dueDate);
+    if (result.ok) {
+      setTasks(currentTasks => currentTasks.map(task => task.id === tempId ? result.data : task));
+    } else {
+      setTasks(previousTasks);
+      setNewTaskTitle(title);
+      setActionError(result.error);
+    }
   };
 
   const handleToggle = async (id: number, currentStatus: boolean) => {
-    // Optimistic update
+    const previousTasks = tasks;
+    setActionError(null);
     setTasks(tasks.map(t => t.id === id ? { ...t, completed: !currentStatus } : t).sort((a, b) => {
       const aCompleted = a.id === id ? !currentStatus : a.completed;
       const bCompleted = b.id === id ? !currentStatus : b.completed;
@@ -150,13 +157,22 @@ export default function TodoList({
       return aCompleted ? 1 : -1;
     }));
     
-    await toggleTask(id, !currentStatus);
+    const result = await toggleTask(id, !currentStatus);
+    if (!result.ok) {
+      setTasks(previousTasks);
+      setActionError(result.error);
+    }
   };
 
   const handleDelete = async (id: number) => {
-    // Optimistic update
+    const previousTasks = tasks;
+    setActionError(null);
     setTasks(tasks.filter(t => t.id !== id));
-    await deleteTask(id);
+    const result = await deleteTask(id);
+    if (!result.ok) {
+      setTasks(previousTasks);
+      setActionError(result.error);
+    }
   };
 
   const handleAddCategory = async (e: React.FormEvent) => {
@@ -169,7 +185,8 @@ export default function TodoList({
       return;
     }
     
-    // Optimistic update
+    const previousCategories = categories;
+    setActionError(null);
     const tempId = Math.random();
     const newCat: Category = {
       id: tempId,
@@ -181,14 +198,26 @@ export default function TodoList({
     setCategories([...categories, newCat]);
     setNewCategoryName('');
     
-    await addCategory(name, newCategoryColor);
+    const result = await addCategory(name, newCategoryColor);
+    if (result.ok) {
+      setCategories(currentCategories => currentCategories.map(cat => cat.id === tempId ? result.data : cat));
+      if (newTaskCategoryId === null) {
+        setNewTaskCategoryId(result.data.id);
+      }
+    } else {
+      setCategories(previousCategories);
+      setNewCategoryName(name);
+      setActionError(result.error);
+    }
   };
 
   const handleDeleteCategory = async (id: number) => {
     const inbox = categories.find(c => c.name === 'Inbox');
     const fallbackId = inbox ? inbox.id : null;
     
-    // Optimistic update categories
+    const previousCategories = categories;
+    const previousTasks = tasks;
+    setActionError(null);
     setCategories(categories.filter(c => c.id !== id));
     
     // Reset active filters if needed
@@ -207,7 +236,12 @@ export default function TodoList({
       categoryColor: inbox?.color
     } : t));
 
-    await deleteCategory(id);
+    const result = await deleteCategory(id);
+    if (!result.ok) {
+      setCategories(previousCategories);
+      setTasks(previousTasks);
+      setActionError(result.error);
+    }
   };
 
   const totalTasks = tasks.length;
@@ -374,6 +408,12 @@ export default function TodoList({
           </svg>
         </button>
       </form>
+
+      {actionError && (
+        <div className="action-error" role="alert">
+          {actionError}
+        </div>
+      )}
 
       {/* Task Creation Metadata Controls */}
       <div className="task-creation-controls">

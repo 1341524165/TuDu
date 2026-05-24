@@ -32,7 +32,11 @@ db.exec(`
 `);
 
 // Add categoryId column to tasks table if it doesn't exist
-const tableInfo = db.pragma("table_info(tasks)") as any[];
+type TableInfoColumn = {
+  name: string;
+};
+
+const tableInfo = db.pragma("table_info(tasks)") as TableInfoColumn[];
 const hasCategoryId = tableInfo.some((col) => col.name === 'categoryId');
 if (!hasCategoryId) {
   db.exec('ALTER TABLE tasks ADD COLUMN categoryId INTEGER REFERENCES categories(id) ON DELETE SET NULL');
@@ -56,4 +60,3 @@ if (count.count === 0) {
 }
 
 export default db;
-

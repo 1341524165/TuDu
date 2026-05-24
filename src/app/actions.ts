@@ -3,6 +3,7 @@
 import { createClient } from '@/utils/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 export type Task = {
   id: number;
@@ -22,20 +23,48 @@ export type Category = {
   isCustom: boolean;
 };
 
-export async function getTasks(): Promise<Task[]> {
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return [];
+type ActionResult<T = undefined> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
 
-  const { data, error } = await supabase
-    .from('tasks')
-    .select('*, categories(name, color)')
-    .order('completed', { ascending: true })
-    .order('createdAt', { ascending: false });
+type CategoryRow = {
+  id: number;
+  name: string;
+  color: string;
+  isCustom: boolean | number;
+};
 
-  if (error || !data) return [];
+type TaskRow = {
+  id: number;
+  title: string;
+  completed: boolean | number;
+  createdAt: string;
+  categoryId: number | null;
+  dueDate: string | null;
+  categories?: Pick<CategoryRow, 'name' | 'color'> | null;
+};
 
-  return data.map((row: any) => ({
+function formatDatabaseError(error: { code?: string; message?: string }, fallback: string) {
+  if (error.code === '42P01') {
+    return 'Supabase tables are missing. Open the Supabase SQL Editor and run supabase_schema.sql.';
+  }
+
+  if (error.code === 'PGRST204') {
+    return 'Supabase columns do not match the app. Re-run the updated supabase_schema.sql in the SQL Editor.';
+  }
+
+  return error.message || fallback;
+}
+
+async function getCurrentUser(supabase: SupabaseClient) {
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) return { user: null, error: error.message };
+  if (!user) return { user: null, error: 'Please sign in again.' };
+  return { user, error: null };
+}
+
+function mapTask(row: TaskRow): Task {
+  return {
     id: row.id,
     title: row.title,
     completed: row.completed === true || row.completed === 1,
@@ -44,45 +73,87 @@ export async function getTasks(): Promise<Task[]> {
     categoryName: row.categories?.name,
     categoryColor: row.categories?.color,
     dueDate: row.dueDate
-  }));
+  };
 }
 
-export async function addTask(title: string, categoryId: number | null, dueDate: string | null = null) {
-  if (!title || title.trim() === '') return;
-  const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
-
-  await supabase.from('tasks').insert({
-    title: title.trim(),
-    categoryId: categoryId,
-    dueDate: dueDate,
-    user_id: user.id
-  });
-  revalidatePath('/');
+function mapCategory(row: CategoryRow): Category {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    isCustom: row.isCustom === true || row.isCustom === 1
+  };
 }
 
-export async function toggleTask(id: number, completed: boolean) {
+export async function getTasks(): Promise<Task[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user } = await getCurrentUser(supabase);
+  if (!user) return [];
 
-  await supabase.from('tasks').update({ completed }).eq('id', id);
-  revalidatePath('/');
+  const { data, error } = await supabase
+    .from('tasks')
+    .select('*, categories(name, color)')
+    .order('completed', { ascending: true })
+    .order('createdAt', { ascending: false });
+
+  if (error || !data) {
+    console.error('Failed to fetch tasks:', error);
+    return [];
+  }
+
+  return data.map(mapTask);
 }
 
-export async function deleteTask(id: number) {
+export async function addTask(title: string, categoryId: number | null, dueDate: string | null = null): Promise<ActionResult<Task>> {
+  if (!title || title.trim() === '') return { ok: false, error: 'Task title is required.' };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  await supabase.from('tasks').delete().eq('id', id);
+  const { data, error } = await supabase
+    .from('tasks')
+    .insert({
+      title: title.trim(),
+      categoryId: categoryId,
+      dueDate: dueDate,
+      user_id: user.id
+    })
+    .select('*, categories(name, color)')
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: formatDatabaseError(error || {}, 'Failed to add task.') };
+  }
+
   revalidatePath('/');
+  return { ok: true, data: mapTask(data) };
+}
+
+export async function toggleTask(id: number, completed: boolean): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+
+  const { error } = await supabase.from('tasks').update({ completed }).eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
+  revalidatePath('/');
+  return { ok: true, data: undefined };
+}
+
+export async function deleteTask(id: number): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+
+  const { error } = await supabase.from('tasks').delete().eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to delete task.') };
+  revalidatePath('/');
+  return { ok: true, data: undefined };
 }
 
 export async function getCategories(): Promise<Category[]> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const { user } = await getCurrentUser(supabase);
   if (!user) return [];
 
   // Fetch categories
@@ -92,7 +163,10 @@ export async function getCategories(): Promise<Category[]> {
     .order('isCustom', { ascending: true })
     .order('name', { ascending: true });
 
-  if (error || !data) return [];
+  if (error || !data) {
+    console.error('Failed to fetch categories:', error);
+    return [];
+  }
 
   // Seed default categories if none exist
   if (data.length === 0) {
@@ -103,7 +177,11 @@ export async function getCategories(): Promise<Category[]> {
       { name: 'Shopping', color: '#fbbf24', isCustom: false, user_id: user.id },
     ];
     
-    await supabase.from('categories').insert(defaultCategories);
+    const { error: insertError } = await supabase.from('categories').insert(defaultCategories);
+    if (insertError) {
+      console.error('Failed to seed categories:', insertError);
+      return [];
+    }
     
     // Refetch
     const { data: refetched } = await supabase
@@ -112,63 +190,69 @@ export async function getCategories(): Promise<Category[]> {
       .order('isCustom', { ascending: true })
       .order('name', { ascending: true });
       
-    return (refetched || []).map((row: any) => ({
-      id: row.id,
-      name: row.name,
-      color: row.color,
-      isCustom: row.isCustom === true || row.isCustom === 1
-    }));
+    return (refetched || []).map(mapCategory);
   }
 
-  return data.map((row: any) => ({
-    id: row.id,
-    name: row.name,
-    color: row.color,
-    isCustom: row.isCustom === true || row.isCustom === 1
-  }));
+  return data.map(mapCategory);
 }
 
-export async function addCategory(name: string, color: string) {
-  if (!name || name.trim() === '' || !color) return;
+export async function addCategory(name: string, color: string): Promise<ActionResult<Category>> {
+  if (!name || name.trim() === '' || !color) return { ok: false, error: 'Category name and color are required.' };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  await supabase.from('categories').insert({
-    name: name.trim(),
-    color,
-    user_id: user.id,
-    isCustom: true
-  });
+  const { data, error } = await supabase
+    .from('categories')
+    .insert({
+      name: name.trim(),
+      color,
+      user_id: user.id,
+      isCustom: true
+    })
+    .select('*')
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: formatDatabaseError(error || {}, 'Failed to add category.') };
+  }
+
   revalidatePath('/');
+  return { ok: true, data: mapCategory(data) };
 }
 
-export async function deleteCategory(id: number) {
+export async function deleteCategory(id: number): Promise<ActionResult> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  await supabase.from('categories').delete().eq('id', id).eq('isCustom', true);
+  const { error } = await supabase.from('categories').delete().eq('id', id).eq('isCustom', true);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to delete category.') };
   revalidatePath('/');
+  return { ok: true, data: undefined };
 }
 
-export async function updateTaskTitle(id: number, title: string) {
-  if (!title || title.trim() === '') return;
+export async function updateTaskTitle(id: number, title: string): Promise<ActionResult> {
+  if (!title || title.trim() === '') return { ok: false, error: 'Task title is required.' };
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  await supabase.from('tasks').update({ title: title.trim() }).eq('id', id);
+  const { error } = await supabase.from('tasks').update({ title: title.trim() }).eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
   revalidatePath('/');
+  return { ok: true, data: undefined };
 }
 
-export async function updateTaskDueDate(id: number, dueDate: string | null) {
+export async function updateTaskDueDate(id: number, dueDate: string | null): Promise<ActionResult> {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  await supabase.from('tasks').update({ dueDate }).eq('id', id);
+  const { error } = await supabase.from('tasks').update({ dueDate }).eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
   revalidatePath('/');
+  return { ok: true, data: undefined };
 }
 
 export async function logout() {
