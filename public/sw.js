@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tudu-cache-v1';
+const CACHE_NAME = 'tudu-cache-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/manifest.json',
@@ -36,6 +36,11 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
+
+  // Development should always use the Next.js dev server directly.
+  if (self.location.hostname === 'localhost' || self.location.hostname === '127.0.0.1') {
+    return;
+  }
 
   // Only handle HTTP/HTTPS requests (bypass chrome-extension://, chrome://, etc.)
   if (!request.url.startsWith(self.location.origin)) {

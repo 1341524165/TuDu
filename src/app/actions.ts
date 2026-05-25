@@ -85,6 +85,18 @@ function mapCategory(row: CategoryRow): Category {
   };
 }
 
+async function validateCategoryAccess(supabase: SupabaseClient, categoryId: number | null) {
+  if (categoryId === null) return null;
+
+  const { error } = await supabase
+    .from('categories')
+    .select('id')
+    .eq('id', categoryId)
+    .single();
+
+  return error ? formatDatabaseError(error, 'Selected tag is not available.') : null;
+}
+
 export async function getTasks(): Promise<Task[]> {
   const supabase = await createClient();
   const { user } = await getCurrentUser(supabase);
@@ -109,6 +121,8 @@ export async function addTask(title: string, categoryId: number | null, dueDate:
   const supabase = await createClient();
   const { user, error: authError } = await getCurrentUser(supabase);
   if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+  const categoryError = await validateCategoryAccess(supabase, categoryId);
+  if (categoryError) return { ok: false, error: categoryError };
 
   const { data, error } = await supabase
     .from('tasks')
@@ -251,6 +265,19 @@ export async function updateTaskDueDate(id: number, dueDate: string | null): Pro
 
   const { error } = await supabase.from('tasks').update({ dueDate }).eq('id', id);
   if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
+  revalidatePath('/');
+  return { ok: true, data: undefined };
+}
+
+export async function updateTaskCategory(id: number, categoryId: number | null): Promise<ActionResult> {
+  const supabase = await createClient();
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+  const categoryError = await validateCategoryAccess(supabase, categoryId);
+  if (categoryError) return { ok: false, error: categoryError };
+
+  const { error } = await supabase.from('tasks').update({ categoryId }).eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task tag.') };
   revalidatePath('/');
   return { ok: true, data: undefined };
 }

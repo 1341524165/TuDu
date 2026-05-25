@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate } from '@/app/actions';
+import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, logout } from '@/app/actions';
+
+const isTempId = (id: number) => !Number.isSafeInteger(id);
 
 const premiumColors = [
   '#a78bfa', // Violet
@@ -17,18 +19,31 @@ const getDefaultCategoryId = (categories: Category[]) => {
   return inbox ? inbox.id : categories[0]?.id ?? null;
 };
 
-export default function TodoList({ 
-  initialTasks, 
-  initialCategories 
-}: { 
-  initialTasks: Task[]; 
+export default function TodoList({
+  initialTasks,
+  initialCategories
+}: {
+  initialTasks: Task[];
   initialCategories: Category[];
 }) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [newTaskTitle, setNewTaskTitle] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
-  
+
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof document === 'undefined') return 'light';
+    const activeTheme = document.documentElement.getAttribute('data-theme');
+    return activeTheme === 'dark' ? 'dark' : 'light';
+  });
+
+  const toggleTheme = () => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(nextTheme);
+    document.documentElement.setAttribute('data-theme', nextTheme);
+    localStorage.setItem('theme', nextTheme);
+  };
+
   const [newTaskCategoryId, setNewTaskCategoryId] = useState<number | null>(() => getDefaultCategoryId(initialCategories));
   const [selectedFilterCategoryId, setSelectedFilterCategoryId] = useState<number | null>(null);
   const [isManageDrawerOpen, setIsManageDrawerOpen] = useState(false);
@@ -42,6 +57,7 @@ export default function TodoList({
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
 
   const handleStartEdit = (id: number, currentTitle: string, currentDueDate: string | null) => {
+    if (isTempId(id)) return;
     setEditingTaskId(id);
     setEditingTaskText(currentTitle);
     setEditingTaskDueDate(currentDueDate || '');
@@ -65,7 +81,7 @@ export default function TodoList({
 
   const handleSaveEdit = async (id: number) => {
     if (editingTaskId !== id) return;
-    
+
     const trimmedTitle = editingTaskText.trim();
     if (!trimmedTitle) {
       handleCancelEdit();
@@ -112,13 +128,13 @@ export default function TodoList({
   const handleAddTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
-    
+
     const selectedCat = categories.find(c => c.id === newTaskCategoryId);
     const dueDate = newTaskDueDate || null;
     const title = newTaskTitle.trim();
     const previousTasks = tasks;
     setActionError(null);
-    
+
     const tempId = Math.random();
     const newTask: Task = {
       id: tempId,
@@ -130,11 +146,11 @@ export default function TodoList({
       categoryColor: selectedCat?.color,
       dueDate: dueDate
     };
-    
+
     setTasks([newTask, ...tasks]);
     setNewTaskTitle('');
     setNewTaskDueDate('');
-    
+
     const result = await addTask(newTask.title, newTask.categoryId, newTask.dueDate);
     if (result.ok) {
       setTasks(currentTasks => currentTasks.map(task => task.id === tempId ? result.data : task));
@@ -146,6 +162,7 @@ export default function TodoList({
   };
 
   const handleToggle = async (id: number, currentStatus: boolean) => {
+    if (isTempId(id)) return;
     const previousTasks = tasks;
     setActionError(null);
     setTasks(tasks.map(t => t.id === id ? { ...t, completed: !currentStatus } : t).sort((a, b) => {
@@ -156,7 +173,7 @@ export default function TodoList({
       }
       return aCompleted ? 1 : -1;
     }));
-    
+
     const result = await toggleTask(id, !currentStatus);
     if (!result.ok) {
       setTasks(previousTasks);
@@ -165,6 +182,7 @@ export default function TodoList({
   };
 
   const handleDelete = async (id: number) => {
+    if (isTempId(id)) return;
     const previousTasks = tasks;
     setActionError(null);
     setTasks(tasks.filter(t => t.id !== id));
@@ -178,13 +196,13 @@ export default function TodoList({
   const handleAddCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCategoryName.trim()) return;
-    
+
     const name = newCategoryName.trim();
     if (categories.some(c => c.name.toLowerCase() === name.toLowerCase())) {
       alert('Category already exists!');
       return;
     }
-    
+
     const previousCategories = categories;
     setActionError(null);
     const tempId = Math.random();
@@ -194,10 +212,10 @@ export default function TodoList({
       color: newCategoryColor,
       isCustom: true
     };
-    
+
     setCategories([...categories, newCat]);
     setNewCategoryName('');
-    
+
     const result = await addCategory(name, newCategoryColor);
     if (result.ok) {
       setCategories(currentCategories => currentCategories.map(cat => cat.id === tempId ? result.data : cat));
@@ -214,12 +232,12 @@ export default function TodoList({
   const handleDeleteCategory = async (id: number) => {
     const inbox = categories.find(c => c.name === 'Inbox');
     const fallbackId = inbox ? inbox.id : null;
-    
+
     const previousCategories = categories;
     const previousTasks = tasks;
     setActionError(null);
     setCategories(categories.filter(c => c.id !== id));
-    
+
     // Reset active filters if needed
     if (selectedFilterCategoryId === id) {
       setSelectedFilterCategoryId(null);
@@ -227,10 +245,10 @@ export default function TodoList({
     if (newTaskCategoryId === id) {
       setNewTaskCategoryId(fallbackId);
     }
-    
+
     // Optimistic update tasks to fallback category
-    setTasks(tasks.map(t => t.categoryId === id ? { 
-      ...t, 
+    setTasks(tasks.map(t => t.categoryId === id ? {
+      ...t,
       categoryId: fallbackId,
       categoryName: inbox?.name,
       categoryColor: inbox?.color
@@ -244,21 +262,149 @@ export default function TodoList({
     }
   };
 
-  const totalTasks = tasks.length;
-  const completedTasks = tasks.filter(t => t.completed).length;
-  const completionPercentage = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+  const todayTasks = tasks.filter(isTodayTask);
+  const totalTodayTasks = todayTasks.length;
+  const completedTodayTasks = todayTasks.filter(t => t.completed).length;
+  const completionPercentage = totalTodayTasks > 0 ? Math.round((completedTodayTasks / totalTodayTasks) * 100) : 0;
 
   const filteredTasks = selectedFilterCategoryId === null
     ? tasks
     : tasks.filter(t => t.categoryId === selectedFilterCategoryId);
 
+  const filteredTodayTasks = filteredTasks.filter(isTodayTask);
+  const activeFilteredTodayTasks = filteredTodayTasks.filter(t => !t.completed);
+  const completedFilteredTodayTasks = filteredTodayTasks.filter(t => t.completed);
+  const filteredUpcomingTasks = filteredTasks.filter(t => !isTodayTask(t));
+
+  const renderTaskItem = (task: Task) => (
+    <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
+      <label className="checkbox-container">
+        <input
+          type="checkbox"
+          checked={task.completed}
+          onChange={() => handleToggle(task.id, task.completed)}
+        />
+        <span className="checkmark"></span>
+      </label>
+      <div className="task-content">
+        {editingTaskId === task.id ? (
+          <div className="edit-task-row">
+            <input
+              type="text"
+              className="edit-task-input"
+              value={editingTaskText}
+              onChange={(e) => setEditingTaskText(e.target.value)}
+              onBlur={() => handleBlur(task.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEdit(task.id);
+                if (e.key === 'Escape') handleCancelEdit();
+              }}
+              autoFocus
+            />
+            <input
+              type="date"
+              className="edit-task-date-input"
+              value={editingTaskDueDate}
+              onChange={(e) => setEditingTaskDueDate(e.target.value)}
+              onBlur={() => handleBlur(task.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEdit(task.id);
+                if (e.key === 'Escape') handleCancelEdit();
+              }}
+            />
+          </div>
+        ) : (
+          <span
+            className="task-text"
+            onDoubleClick={() => !task.completed && handleStartEdit(task.id, task.title, task.dueDate)}
+            title={task.completed ? undefined : "Double-click to edit"}
+          >
+            {task.title}
+          </span>
+        )}
+        <div className="task-meta-row">
+          {task.categoryName && (
+            <span className="task-category-badge" style={{ color: task.categoryColor } as React.CSSProperties}>
+              <span className="badge-dot" style={{ backgroundColor: task.categoryColor }}></span>
+              {task.categoryName}
+            </span>
+          )}
+          {task.dueDate && (
+            <span className={`due-date-badge ${getDueDateClass(task.dueDate, task.completed)}`}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="calendar-icon">
+                <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="16" y1="2" x2="16" y2="6"></line>
+                <line x1="8" y1="2" x2="8" y2="6"></line>
+                <line x1="3" y1="10" x2="21" y2="10"></line>
+              </svg>
+              {getDueDateText(task.dueDate)}
+            </span>
+          )}
+        </div>
+      </div>
+      <button onClick={() => handleDelete(task.id)} className="delete-btn" aria-label="Delete task">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 6h18"></path>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          <line x1="10" y1="11" x2="10" y2="17"></line>
+          <line x1="14" y1="11" x2="14" y2="17"></line>
+        </svg>
+      </button>
+    </li>
+  );
+
   return (
     <>
+      {/* Dynamic Header */}
+      <header>
+        <div className="header-top">
+          <h1>TuDu</h1>
+          <div className="header-actions">
+            <button
+              type="button"
+              className="theme-toggle-btn"
+              onClick={toggleTheme}
+              aria-label={`Switch to ${theme === 'light' ? 'dark' : 'light'} theme`}
+              data-theme-state={theme}
+              suppressHydrationWarning
+            >
+              <span className="theme-toggle-thumb" aria-hidden="true"></span>
+              <span className="theme-toggle-icon theme-toggle-icon-sun" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="4"></circle>
+                  <line x1="12" y1="2" x2="12" y2="4"></line>
+                  <line x1="12" y1="20" x2="12" y2="22"></line>
+                  <line x1="4.93" y1="4.93" x2="6.34" y2="6.34"></line>
+                  <line x1="17.66" y1="17.66" x2="19.07" y2="19.07"></line>
+                  <line x1="2" y1="12" x2="4" y2="12"></line>
+                  <line x1="20" y1="12" x2="22" y2="12"></line>
+                  <line x1="4.93" y1="19.07" x2="6.34" y2="17.66"></line>
+                  <line x1="17.66" y1="6.34" x2="19.07" y2="4.93"></line>
+                </svg>
+              </span>
+              <span className="theme-toggle-icon theme-toggle-icon-moon" aria-hidden="true">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+              </span>
+            </button>
+            <button type="button" onClick={() => logout()} className="logout-btn" aria-label="Sign Out">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path>
+                <polyline points="16 17 21 12 16 7"></polyline>
+                <line x1="21" y1="12" x2="9" y2="12"></line>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <p className="subtitle">Focus on what matters today.</p>
+      </header>
+
       {/* Stats Dashboard */}
       <div className="stats-dashboard">
         <div className="stats-info">
           <span className="stats-count">
-            {completedTasks} of {totalTasks} completed
+            {completedTodayTasks} of {totalTodayTasks} completed today
           </span>
           <p className="stats-quote">
             {getMotivationalText(completionPercentage)}
@@ -300,7 +446,7 @@ export default function TodoList({
       <div className="category-section">
         <div className="category-filters-container">
           <div className="category-pills">
-            <button 
+            <button
               type="button"
               className={`filter-pill ${selectedFilterCategoryId === null ? 'active' : ''}`}
               onClick={() => setSelectedFilterCategoryId(null)}
@@ -320,9 +466,9 @@ export default function TodoList({
               </button>
             ))}
           </div>
-          <button 
-            type="button" 
-            className={`manage-categories-btn ${isManageDrawerOpen ? 'active' : ''}`} 
+          <button
+            type="button"
+            className={`manage-categories-btn ${isManageDrawerOpen ? 'active' : ''}`}
             onClick={() => setIsManageDrawerOpen(!isManageDrawerOpen)}
             aria-label="Manage Categories"
           >
@@ -339,11 +485,11 @@ export default function TodoList({
             <div className="drawer-header">
               <h3>Manage Categories</h3>
             </div>
-            
+
             <form onSubmit={handleAddCategory} className="new-category-form">
-              <input 
-                type="text" 
-                placeholder="New category..." 
+              <input
+                type="text"
+                placeholder="New category..."
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
                 maxLength={15}
@@ -374,8 +520,8 @@ export default function TodoList({
                     {!cat.isCustom && <span className="system-tag">Default</span>}
                   </div>
                   {cat.isCustom && (
-                    <button 
-                      type="button" 
+                    <button
+                      type="button"
                       className="delete-category-btn"
                       onClick={() => handleDeleteCategory(cat.id)}
                       aria-label={`Delete ${cat.name} category`}
@@ -441,7 +587,7 @@ export default function TodoList({
         {/* Date Selector */}
         <div className="task-date-picker">
           <span className="picker-label">Due:</span>
-          <input 
+          <input
             type="date"
             className="creation-date-input"
             value={newTaskDueDate}
@@ -451,7 +597,7 @@ export default function TodoList({
         </div>
       </div>
 
-      {/* Task List */}
+      {/* Task Sections */}
       {filteredTasks.length === 0 ? (
         <div className="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -461,101 +607,98 @@ export default function TodoList({
           <p>{selectedFilterCategoryId === null ? "All caught up! You're good to go." : "No tasks in this category."}</p>
         </div>
       ) : (
-        <ul className="task-list">
-          {filteredTasks.map((task) => (
-            <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
-              <label className="checkbox-container">
-                <input
-                  type="checkbox"
-                  checked={task.completed}
-                  onChange={() => handleToggle(task.id, task.completed)}
-                />
-                <span className="checkmark"></span>
-              </label>
-              <div className="task-content">
-                {editingTaskId === task.id ? (
-                  <div className="edit-task-row">
-                    <input
-                      type="text"
-                      className="edit-task-input"
-                      value={editingTaskText}
-                      onChange={(e) => setEditingTaskText(e.target.value)}
-                      onBlur={() => handleBlur(task.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveEdit(task.id);
-                        if (e.key === 'Escape') handleCancelEdit();
-                      }}
-                      autoFocus
-                    />
-                    <input
-                      type="date"
-                      className="edit-task-date-input"
-                      value={editingTaskDueDate}
-                      onChange={(e) => setEditingTaskDueDate(e.target.value)}
-                      onBlur={() => handleBlur(task.id)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') handleSaveEdit(task.id);
-                        if (e.key === 'Escape') handleCancelEdit();
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <span 
-                    className="task-text"
-                    onDoubleClick={() => !task.completed && handleStartEdit(task.id, task.title, task.dueDate)}
-                    title={task.completed ? undefined : "Double-click to edit"}
-                  >
-                    {task.title}
-                  </span>
-                )}
-                <div className="task-meta-row">
-                  {task.categoryName && (
-                    <span className="task-category-badge" style={{ color: task.categoryColor } as React.CSSProperties}>
-                      <span className="badge-dot" style={{ backgroundColor: task.categoryColor }}></span>
-                      {task.categoryName}
-                    </span>
-                  )}
-                  {task.dueDate && (
-                    <span className={`due-date-badge ${getDueDateClass(task.dueDate, task.completed)}`}>
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="calendar-icon">
-                        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="16" y1="2" x2="16" y2="6"></line>
-                        <line x1="8" y1="2" x2="8" y2="6"></line>
-                        <line x1="3" y1="10" x2="21" y2="10"></line>
-                      </svg>
-                      {getDueDateText(task.dueDate)}
-                    </span>
-                  )}
+        <div className="task-sections">
+          {/* Today's Focus Section */}
+          {(filteredTodayTasks.length > 0 || filteredUpcomingTasks.length > 0) && (
+            <div className="task-section today-focus-section">
+              <div className="section-header">
+                <div className="section-title">
+                  <span>Today&apos;s Focus</span>
                 </div>
+                <span className="section-count">{activeFilteredTodayTasks.length}</span>
               </div>
-              <button onClick={() => handleDelete(task.id)} className="delete-btn" aria-label="Delete task">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 6h18"></path>
-                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                  <line x1="10" y1="11" x2="10" y2="17"></line>
-                  <line x1="14" y1="11" x2="14" y2="17"></line>
-                </svg>
-              </button>
-            </li>
-          ))}
-        </ul>
+
+              {activeFilteredTodayTasks.length === 0 ? (
+                <>
+                  <div className="today-empty-card">
+                    <span className="today-empty-icon">{filteredTodayTasks.length > 0 ? '🎉' : '☀️'}</span>
+                    <h4 className="today-empty-title">
+                      {filteredTodayTasks.length > 0 ? 'All caught up for today!' : 'No tasks for today'}
+                    </h4>
+                    <p className="today-empty-subtitle">
+                      {selectedFilterCategoryId !== null
+                        ? "No tasks due today in this tag. Keep up the great work!"
+                        : filteredTodayTasks.length > 0
+                          ? "Outstanding! You crushed all your goals today. Enjoy your day!"
+                          : "Nothing scheduled for today. Add a task or enjoy a free day!"}
+                    </p>
+                  </div>
+                  {completedFilteredTodayTasks.length > 0 && (
+                    <ul className="task-list" style={{ marginTop: '0.75rem' }}>
+                      {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                    </ul>
+                  )}
+                </>
+              ) : (
+                <>
+                  <ul className="task-list">
+                    {activeFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                  </ul>
+                  {completedFilteredTodayTasks.length > 0 && (
+                    <ul className="task-list" style={{ marginTop: '0.75rem' }}>
+                      {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                    </ul>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Upcoming Section */}
+          {filteredUpcomingTasks.length > 0 && (
+            <div className="task-section upcoming-section">
+              <div className="section-header">
+                <div className="section-title">
+                  <span>Upcoming</span>
+                </div>
+                <span className="section-count">{filteredUpcomingTasks.length}</span>
+              </div>
+
+              <ul className="task-list">
+                {filteredUpcomingTasks.map((task) => renderTaskItem(task))}
+              </ul>
+            </div>
+          )}
+        </div>
       )}
     </>
   );
 }
 
-const getDueDateText = (dueDate: string | null) => {
-  if (!dueDate) return '';
-  
+const isTodayTask = (task: Task) => {
+  if (!task.dueDate) return true;
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
+  const due = new Date(task.dueDate);
+  due.setHours(0, 0, 0, 0);
+
+  return due.getTime() <= today.getTime();
+};
+
+const getDueDateText = (dueDate: string | null) => {
+  if (!dueDate) return '';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const due = new Date(dueDate);
   due.setHours(0, 0, 0, 0);
-  
+
   const diffTime = due.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
+
   if (diffDays < 0) {
     return 'Overdue';
   } else if (diffDays === 0) {
@@ -571,16 +714,16 @@ const getDueDateText = (dueDate: string | null) => {
 
 const getDueDateClass = (dueDate: string | null, completed: boolean) => {
   if (!dueDate || completed) return 'date-normal';
-  
+
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  
+
   const due = new Date(dueDate);
   due.setHours(0, 0, 0, 0);
-  
+
   const diffTime = due.getTime() - today.getTime();
   const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-  
+
   if (diffDays < 0) {
     return 'date-overdue';
   } else if (diffDays === 0) {

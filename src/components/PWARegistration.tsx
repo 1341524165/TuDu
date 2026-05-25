@@ -5,6 +5,13 @@ import { useEffect } from 'react';
 export default function PWARegistration() {
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      if (process.env.NODE_ENV !== 'production') {
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          registrations.forEach((registration) => registration.unregister());
+        });
+        return;
+      }
+
       const handleRegister = () => {
         navigator.serviceWorker
           .register('/sw.js')
