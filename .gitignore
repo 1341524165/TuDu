@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# agent global skills (symlinks pointing to absolute local paths)
+.agent/skills/brainstorming
+.agent/skills/finishing-a-development-branch
+.agent/skills/subagent-driven-development
+.agent/skills/using-git-worktrees
+.agent/skills/writing-plans
+
