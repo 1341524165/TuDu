@@ -165,7 +165,7 @@ export default function TodoList({
     if (isTempId(id)) return;
     const previousTasks = tasks;
     setActionError(null);
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !currentStatus } : t).sort((a, b) => {
+    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !currentStatus, completedAt: !currentStatus ? new Date().toISOString() : null } : t).sort((a, b) => {
       const aCompleted = a.id === id ? !currentStatus : a.completed;
       const bCompleted = b.id === id ? !currentStatus : b.completed;
       if (aCompleted === bCompleted) {
@@ -274,7 +274,7 @@ export default function TodoList({
   const filteredTodayTasks = filteredTasks.filter(isTodayTask);
   const activeFilteredTodayTasks = filteredTodayTasks.filter(t => !t.completed);
   const completedFilteredTodayTasks = filteredTodayTasks.filter(t => t.completed);
-  const filteredUpcomingTasks = filteredTasks.filter(t => !isTodayTask(t));
+  const filteredUpcomingTasks = filteredTasks.filter(t => !t.completed && !isTodayTask(t));
 
   const renderTaskItem = (task: Task) => (
     <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
@@ -286,7 +286,11 @@ export default function TodoList({
         />
         <span className="checkmark"></span>
       </label>
-      <div className="task-content">
+      <div
+        className="task-content"
+        onDoubleClick={() => editingTaskId !== task.id && handleStartEdit(task.id, task.title, task.dueDate)}
+        title="Double-click to edit"
+      >
         {editingTaskId === task.id ? (
           <div className="edit-task-row">
             <input
@@ -316,8 +320,11 @@ export default function TodoList({
         ) : (
           <span
             className="task-text"
-            onDoubleClick={() => !task.completed && handleStartEdit(task.id, task.title, task.dueDate)}
-            title={task.completed ? undefined : "Double-click to edit"}
+            onDoubleClick={(e) => {
+              e.stopPropagation(); // Avoid double triggering
+              handleStartEdit(task.id, task.title, task.dueDate);
+            }}
+            title="Double-click to edit"
           >
             {task.title}
           </span>
@@ -342,6 +349,18 @@ export default function TodoList({
           )}
         </div>
       </div>
+      <button
+        type="button"
+        onClick={() => handleStartEdit(task.id, task.title, task.dueDate)}
+        className="edit-btn"
+        aria-label="Edit task"
+        title="Edit task"
+      >
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+          <path d="M18.5 2.5a2.121 2.121 0 1 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+        </svg>
+      </button>
       <button onClick={() => handleDelete(task.id)} className="delete-btn" aria-label="Delete task">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 6h18"></path>
@@ -676,6 +695,15 @@ export default function TodoList({
 }
 
 const isTodayTask = (task: Task) => {
+  if (task.completed) {
+    if (!task.completedAt) return false;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const completedDate = new Date(task.completedAt);
+    completedDate.setHours(0, 0, 0, 0);
+    return completedDate.getTime() === today.getTime();
+  }
+
   if (!task.dueDate) return true;
 
   const today = new Date();

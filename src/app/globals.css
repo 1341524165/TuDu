@@ -438,6 +438,35 @@ button.add-btn:active {
   font-size: 1.05rem;
   transition: all 0.2s ease;
   word-break: break-word;
+  cursor: pointer;
+}
+
+.task-text:hover {
+  color: var(--accent);
+}
+
+.edit-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  opacity: 0;
+  margin-right: 0.25rem;
+}
+
+.task-item:hover .edit-btn {
+  opacity: 1;
+}
+
+.edit-btn:hover {
+  color: var(--accent);
+  background: var(--accent-glow);
 }
 
 .delete-btn {

@@ -14,6 +14,7 @@ export type Task = {
   categoryName?: string;
   categoryColor?: string;
   dueDate: string | null;
+  completedAt?: string | null;
 };
 
 export type Category = {
@@ -41,6 +42,7 @@ type TaskRow = {
   createdAt: string;
   categoryId: number | null;
   dueDate: string | null;
+  completedAt: string | null;
   categories?: Pick<CategoryRow, 'name' | 'color'> | null;
 };
 
@@ -72,7 +74,8 @@ function mapTask(row: TaskRow): Task {
     categoryId: row.categoryId,
     categoryName: row.categories?.name,
     categoryColor: row.categories?.color,
-    dueDate: row.dueDate
+    dueDate: row.dueDate,
+    completedAt: row.completedAt
   };
 }
 
@@ -148,7 +151,9 @@ export async function toggleTask(id: number, completed: boolean): Promise<Action
   const { user, error: authError } = await getCurrentUser(supabase);
   if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  const { error } = await supabase.from('tasks').update({ completed }).eq('id', id);
+  const completedAt = completed ? new Date().toISOString() : null;
+
+  const { error } = await supabase.from('tasks').update({ completed, completedAt }).eq('id', id);
   if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
   revalidatePath('/');
   return { ok: true, data: undefined };
