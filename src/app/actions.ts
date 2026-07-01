@@ -15,6 +15,7 @@ export type Task = {
   categoryColor?: string;
   dueDate: string | null;
   completedAt?: string | null;
+  failureReason?: string | null;
 };
 
 export type Category = {
@@ -43,6 +44,7 @@ type TaskRow = {
   categoryId: number | null;
   dueDate: string | null;
   completedAt: string | null;
+  failureReason: string | null;
   categories?: Pick<CategoryRow, 'name' | 'color'> | null;
 };
 
@@ -75,7 +77,8 @@ function mapTask(row: TaskRow): Task {
     categoryName: row.categories?.name,
     categoryColor: row.categories?.color,
     dueDate: row.dueDate,
-    completedAt: row.completedAt
+    completedAt: row.completedAt,
+    failureReason: row.failureReason
   };
 }
 
@@ -153,8 +156,28 @@ export async function toggleTask(id: number, completed: boolean): Promise<Action
 
   const completedAt = completed ? new Date().toISOString() : null;
 
-  const { error } = await supabase.from('tasks').update({ completed, completedAt }).eq('id', id);
+  const { error } = await supabase
+    .from('tasks')
+    .update({ completed, completedAt, failureReason: null })
+    .eq('id', id);
   if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
+  revalidatePath('/');
+  return { ok: true, data: undefined };
+}
+
+export async function failTask(id: number, reason: string): Promise<ActionResult> {
+  const failureReason = reason.trim();
+  if (!failureReason) return { ok: false, error: 'Please explain why the task failed.' };
+
+  const supabase = await createClient();
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+
+  const { error } = await supabase
+    .from('tasks')
+    .update({ completed: true, completedAt: new Date().toISOString(), failureReason })
+    .eq('id', id);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to mark task as failed.') };
   revalidatePath('/');
   return { ok: true, data: undefined };
 }

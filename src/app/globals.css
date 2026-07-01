@@ -382,6 +382,102 @@ button.add-btn:active {
   color: var(--text-secondary);
 }
 
+.task-item.failed .task-text {
+  text-decoration-color: var(--danger);
+}
+
+.task-outcome-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.task-outcome-badge.success {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.task-outcome-badge.failure {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.failure-reason {
+  margin: 0.2rem 0 0;
+  color: var(--danger);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.failure-reason::before {
+  content: "Reason: ";
+  font-weight: 600;
+}
+
+.failure-reason-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.failure-reason-form input {
+  flex: 1 1 240px;
+  min-width: 0;
+  color: var(--text-primary);
+  background: var(--control-bg);
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.failure-reason-form button,
+.fail-btn {
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.failure-reason-form button {
+  padding: 0.4rem 0.65rem;
+  color: var(--text-primary);
+  background: var(--surface-muted);
+}
+
+.failure-reason-form button[type="submit"] {
+  color: white;
+  background: var(--danger);
+}
+
+.failure-reason-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.fail-btn {
+  display: flex;
+  padding: 0.5rem;
+  color: var(--text-secondary);
+  background: transparent;
+  opacity: 0;
+  transition: all 0.2s ease;
+}
+
+.task-item:hover .fail-btn,
+.fail-btn:focus-visible {
+  opacity: 1;
+}
+
+.fail-btn:hover {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
 .checkbox-container {
   display: flex;
   align-items: center;

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
+import { Task, Category, addTask, toggleTask, failTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
 
 const isTempId = (id: number) => !Number.isSafeInteger(id);
 
@@ -54,6 +54,8 @@ export default function TodoList({
   const [editingTaskText, setEditingTaskText] = useState('');
   const [editingTaskDueDate, setEditingTaskDueDate] = useState('');
   const [editingTaskCategoryId, setEditingTaskCategoryId] = useState<number | null>(null);
+  const [failingTaskId, setFailingTaskId] = useState<number | null>(null);
+  const [failureReason, setFailureReason] = useState('');
 
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
 
@@ -185,7 +187,12 @@ export default function TodoList({
     if (isTempId(id)) return;
     const previousTasks = tasks;
     setActionError(null);
-    setTasks(tasks.map(t => t.id === id ? { ...t, completed: !currentStatus, completedAt: !currentStatus ? new Date().toISOString() : null } : t).sort((a, b) => {
+    setTasks(tasks.map(t => t.id === id ? {
+      ...t,
+      completed: !currentStatus,
+      completedAt: !currentStatus ? new Date().toISOString() : null,
+      failureReason: null
+    } : t).sort((a, b) => {
       const aCompleted = a.id === id ? !currentStatus : a.completed;
       const bCompleted = b.id === id ? !currentStatus : b.completed;
       if (aCompleted === bCompleted) {
@@ -207,6 +214,26 @@ export default function TodoList({
     setActionError(null);
     setTasks(tasks.filter(t => t.id !== id));
     const result = await deleteTask(id);
+    if (!result.ok) {
+      setTasks(previousTasks);
+      setActionError(result.error);
+    }
+  };
+
+  const handleFailTask = async (id: number) => {
+    const reason = failureReason.trim();
+    if (!reason || isTempId(id)) return;
+
+    const previousTasks = tasks;
+    const completedAt = new Date().toISOString();
+    setActionError(null);
+    setTasks(tasks.map(task => task.id === id
+      ? { ...task, completed: true, completedAt, failureReason: reason }
+      : task));
+    setFailingTaskId(null);
+    setFailureReason('');
+
+    const result = await failTask(id, reason);
     if (!result.ok) {
       setTasks(previousTasks);
       setActionError(result.error);
@@ -297,12 +324,13 @@ export default function TodoList({
   const filteredUpcomingTasks = filteredTasks.filter(t => !t.completed && !isTodayTask(t));
 
   const renderTaskItem = (task: Task) => (
-    <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''}`}>
+    <li key={task.id} className={`task-item ${task.completed ? 'completed' : ''} ${task.failureReason ? 'failed' : ''}`}>
       <label className="checkbox-container">
         <input
           type="checkbox"
           checked={task.completed}
           onChange={() => handleToggle(task.id, task.completed)}
+          aria-label={task.completed ? 'Reopen task' : 'Mark task as succeeded'}
         />
         <span className="checkmark"></span>
       </label>
@@ -366,6 +394,11 @@ export default function TodoList({
           </span>
         )}
         <div className="task-meta-row">
+          {task.completed && (
+            <span className={`task-outcome-badge ${task.failureReason ? 'failure' : 'success'}`}>
+              {task.failureReason ? 'Failed' : 'Succeeded'}
+            </span>
+          )}
           {task.categoryName && (
             <span className="task-category-badge" style={{ color: task.categoryColor } as React.CSSProperties}>
               <span className="badge-dot" style={{ backgroundColor: task.categoryColor }}></span>
@@ -384,7 +417,35 @@ export default function TodoList({
             </span>
           )}
         </div>
+        {task.failureReason && <p className="failure-reason">{task.failureReason}</p>}
+        {failingTaskId === task.id && (
+          <form className="failure-reason-form" onSubmit={(event) => { event.preventDefault(); handleFailTask(task.id); }}>
+            <input
+              type="text"
+              value={failureReason}
+              onChange={(event) => setFailureReason(event.target.value)}
+              placeholder="What prevented this task from succeeding?"
+              aria-label="Failure reason"
+              autoFocus
+            />
+            <button type="submit" disabled={!failureReason.trim()}>Save</button>
+            <button type="button" onClick={() => { setFailingTaskId(null); setFailureReason(''); }}>Cancel</button>
+          </form>
+        )}
       </div>
+      {!task.completed && failingTaskId !== task.id && (
+        <button
+          type="button"
+          className="fail-btn"
+          onClick={() => { setFailingTaskId(task.id); setFailureReason(''); }}
+          aria-label="Mark task as failed"
+          title="Mark as failed"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      )}
       <button
         type="button"
         onClick={() => handleStartEdit(task.id, task.title, task.dueDate, task.categoryId)}

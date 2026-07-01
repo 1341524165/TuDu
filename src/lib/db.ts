@@ -48,6 +48,11 @@ if (!hasDueDate) {
   db.exec('ALTER TABLE tasks ADD COLUMN dueDate TEXT');
 }
 
+const hasFailureReason = tableInfo.some((col) => col.name === 'failureReason');
+if (!hasFailureReason) {
+  db.exec('ALTER TABLE tasks ADD COLUMN failureReason TEXT');
+}
+
 
 // Seed default categories if they don't exist
 const count = db.prepare('SELECT COUNT(*) as count FROM categories WHERE isCustom = 0').get() as { count: number };

@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   "categoryId" BIGINT REFERENCES categories(id) ON DELETE SET NULL,
   "dueDate" TEXT DEFAULT NULL,
   "completedAt" TIMESTAMP WITH TIME ZONE DEFAULT NULL,
+  "failureReason" TEXT DEFAULT NULL,
   user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL
 );
 
@@ -67,6 +68,9 @@ BEGIN
     ALTER TABLE tasks RENAME COLUMN duedate TO "dueDate";
   END IF;
 END $$;
+
+-- Add failure explanations to databases created from an older schema.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS "failureReason" TEXT DEFAULT NULL;
 
 -- Enable RLS (Row Level Security)
 ALTER TABLE categories ENABLE ROW LEVEL SECURITY;
