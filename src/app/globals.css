@@ -461,10 +461,14 @@ button.add-btn:active {
 
 .fail-btn {
   display: flex;
-  padding: 0.5rem;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 2px;
   color: var(--text-secondary);
   background: transparent;
-  opacity: 0;
+  opacity: 0.65;
   transition: all 0.2s ease;
 }
 
@@ -478,12 +482,20 @@ button.add-btn:active {
   background: var(--danger-soft);
 }
 
+.task-outcome-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  align-self: flex-start;
+  gap: 0.35rem;
+  margin-right: 1rem;
+}
+
 .checkbox-container {
   display: flex;
   align-items: center;
   cursor: pointer;
   position: relative;
-  margin-right: 1rem;
 }
 
 .checkbox-container input {
