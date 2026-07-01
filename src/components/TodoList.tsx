@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, logout } from '@/app/actions';
+import { Task, Category, addTask, toggleTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
 
 const isTempId = (id: number) => !Number.isSafeInteger(id);
 
@@ -53,26 +53,29 @@ export default function TodoList({
   const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
   const [editingTaskText, setEditingTaskText] = useState('');
   const [editingTaskDueDate, setEditingTaskDueDate] = useState('');
+  const [editingTaskCategoryId, setEditingTaskCategoryId] = useState<number | null>(null);
 
   const [newTaskDueDate, setNewTaskDueDate] = useState('');
 
-  const handleStartEdit = (id: number, currentTitle: string, currentDueDate: string | null) => {
+  const handleStartEdit = (id: number, currentTitle: string, currentDueDate: string | null, currentCategoryId: number | null) => {
     if (isTempId(id)) return;
     setEditingTaskId(id);
     setEditingTaskText(currentTitle);
     setEditingTaskDueDate(currentDueDate || '');
+    setEditingTaskCategoryId(currentCategoryId);
   };
 
   const handleCancelEdit = () => {
     setEditingTaskId(null);
     setEditingTaskText('');
     setEditingTaskDueDate('');
+    setEditingTaskCategoryId(null);
   };
 
   const handleBlur = (id: number) => {
     setTimeout(() => {
       const activeEl = document.activeElement;
-      if (activeEl && (activeEl.classList.contains('edit-task-input') || activeEl.classList.contains('edit-task-date-input'))) {
+      if (activeEl && (activeEl.classList.contains('edit-task-input') || activeEl.classList.contains('edit-task-date-input') || activeEl.classList.contains('edit-task-category-select'))) {
         return;
       }
       handleSaveEdit(id);
@@ -96,17 +99,26 @@ export default function TodoList({
 
     const newDueDate = editingTaskDueDate || null;
 
-    if (currentTask.title === trimmedTitle && currentTask.dueDate === newDueDate) {
+    if (currentTask.title === trimmedTitle && currentTask.dueDate === newDueDate && currentTask.categoryId === editingTaskCategoryId) {
       handleCancelEdit();
       return;
     }
 
     const previousTasks = tasks;
     setActionError(null);
-    setTasks(tasks.map(t => t.id === id ? { ...t, title: trimmedTitle, dueDate: newDueDate } : t));
+    const selectedCategory = categories.find(category => category.id === editingTaskCategoryId);
+    setTasks(tasks.map(t => t.id === id ? {
+      ...t,
+      title: trimmedTitle,
+      dueDate: newDueDate,
+      categoryId: editingTaskCategoryId,
+      categoryName: selectedCategory?.name,
+      categoryColor: selectedCategory?.color
+    } : t));
     setEditingTaskId(null);
     setEditingTaskText('');
     setEditingTaskDueDate('');
+    setEditingTaskCategoryId(null);
 
     if (currentTask.title !== trimmedTitle) {
       const result = await updateTaskTitle(id, trimmedTitle);
@@ -118,6 +130,14 @@ export default function TodoList({
     }
     if (currentTask.dueDate !== newDueDate) {
       const result = await updateTaskDueDate(id, newDueDate);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+        return;
+      }
+    }
+    if (currentTask.categoryId !== editingTaskCategoryId) {
+      const result = await updateTaskCategory(id, editingTaskCategoryId);
       if (!result.ok) {
         setTasks(previousTasks);
         setActionError(result.error);
@@ -288,7 +308,7 @@ export default function TodoList({
       </label>
       <div
         className="task-content"
-        onDoubleClick={() => editingTaskId !== task.id && handleStartEdit(task.id, task.title, task.dueDate)}
+        onDoubleClick={() => editingTaskId !== task.id && handleStartEdit(task.id, task.title, task.dueDate, task.categoryId)}
         title="Double-click to edit"
       >
         {editingTaskId === task.id ? (
@@ -316,13 +336,29 @@ export default function TodoList({
                 if (e.key === 'Escape') handleCancelEdit();
               }}
             />
+            <select
+              className="edit-task-category-select"
+              value={editingTaskCategoryId ?? ''}
+              onChange={(e) => setEditingTaskCategoryId(e.target.value === '' ? null : Number(e.target.value))}
+              onBlur={() => handleBlur(task.id)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSaveEdit(task.id);
+                if (e.key === 'Escape') handleCancelEdit();
+              }}
+              aria-label="Edit task tag"
+            >
+              <option value="">No tag</option>
+              {categories.map(category => (
+                <option key={category.id} value={category.id}>{category.name}</option>
+              ))}
+            </select>
           </div>
         ) : (
           <span
             className="task-text"
             onDoubleClick={(e) => {
               e.stopPropagation(); // Avoid double triggering
-              handleStartEdit(task.id, task.title, task.dueDate);
+              handleStartEdit(task.id, task.title, task.dueDate, task.categoryId);
             }}
             title="Double-click to edit"
           >
@@ -351,7 +387,7 @@ export default function TodoList({
       </div>
       <button
         type="button"
-        onClick={() => handleStartEdit(task.id, task.title, task.dueDate)}
+        onClick={() => handleStartEdit(task.id, task.title, task.dueDate, task.categoryId)}
         className="edit-btn"
         aria-label="Edit task"
         title="Edit task"
