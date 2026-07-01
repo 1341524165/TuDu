@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Task, Category, addTask, toggleTask, failTask, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
+import { Task, Category, addTask, toggleTask, failTask, updateFailureReason, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
 
 const isTempId = (id: number) => !Number.isSafeInteger(id);
 
@@ -224,16 +224,21 @@ export default function TodoList({
     const reason = failureReason.trim();
     if (!reason || isTempId(id)) return;
 
+    const currentTask = tasks.find(task => task.id === id);
+    if (!currentTask) return;
+
     const previousTasks = tasks;
     const completedAt = new Date().toISOString();
     setActionError(null);
     setTasks(tasks.map(task => task.id === id
-      ? { ...task, completed: true, completedAt, failureReason: reason }
+      ? { ...task, completed: true, completedAt: task.completedAt || completedAt, failureReason: reason }
       : task));
     setFailingTaskId(null);
     setFailureReason('');
 
-    const result = await failTask(id, reason);
+    const result = currentTask.failureReason
+      ? await updateFailureReason(id, reason)
+      : await failTask(id, reason);
     if (!result.ok) {
       setTasks(previousTasks);
       setActionError(result.error);
@@ -432,7 +437,17 @@ export default function TodoList({
             </span>
           )}
         </div>
-        {task.failureReason && <p className="failure-reason">{task.failureReason}</p>}
+        {task.failureReason && failingTaskId !== task.id && (
+          <button
+            type="button"
+            className="failure-reason"
+            onClick={() => { setFailingTaskId(task.id); setFailureReason(task.failureReason || ''); }}
+            aria-label="Edit failure reason"
+            title="Click to edit failure reason"
+          >
+            {task.failureReason}
+          </button>
+        )}
         {failingTaskId === task.id && (
           <form className="failure-reason-form" onSubmit={(event) => { event.preventDefault(); handleFailTask(task.id); }}>
             <input

@@ -182,6 +182,24 @@ export async function failTask(id: number, reason: string): Promise<ActionResult
   return { ok: true, data: undefined };
 }
 
+export async function updateFailureReason(id: number, reason: string): Promise<ActionResult> {
+  const failureReason = reason.trim();
+  if (!failureReason) return { ok: false, error: 'Please explain why the task failed.' };
+
+  const supabase = await createClient();
+  const { user, error: authError } = await getCurrentUser(supabase);
+  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
+
+  const { error } = await supabase
+    .from('tasks')
+    .update({ failureReason })
+    .eq('id', id)
+    .eq('completed', true);
+  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update failure reason.') };
+  revalidatePath('/');
+  return { ok: true, data: undefined };
+}
+
 export async function deleteTask(id: number): Promise<ActionResult> {
   const supabase = await createClient();
   const { user, error: authError } = await getCurrentUser(supabase);

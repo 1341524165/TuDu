@@ -406,8 +406,15 @@ button.add-btn:active {
 }
 
 .failure-reason {
+  display: block;
   margin: 0.2rem 0 0;
+  padding: 0;
+  border: 0;
   color: var(--danger);
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   font-size: 0.82rem;
   line-height: 1.4;
 }
