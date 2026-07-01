@@ -1,7 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Task, Category, addTask, toggleTask, failTask, updateFailureReason, deleteTask, addCategory, deleteCategory, updateTaskTitle, updateTaskDueDate, updateTaskCategory, logout } from '@/app/actions';
+import { useState, useRef } from 'react';
+import { Task, Category, getTasks, addTask, toggleTask, failTask, updateFailureReason, deleteTask, addCategory, deleteCategory, updateTaskDetails, logout } from '@/app/actions';
+import CalendarView from '@/components/CalendarView';
+import type { CalendarSavedState } from '@/components/CalendarView';
+import DateTaskList from '@/components/DateTaskList';
 
 const isTempId = (id: number) => !Number.isSafeInteger(id);
 
@@ -21,15 +24,45 @@ const getDefaultCategoryId = (categories: Category[]) => {
 
 export default function TodoList({
   initialTasks,
-  initialCategories
+  initialCategories,
+  initialLoadError = null,
 }: {
   initialTasks: Task[];
   initialCategories: Category[];
+  initialLoadError?: string | null;
 }) {
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [categories, setCategories] = useState<Category[]>(initialCategories);
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(initialLoadError);
+
+  // Tab state
+  const [activeTab, setActiveTab] = useState<'tasks' | 'calendar'>('tasks');
+  // Date mode: when opening a date from Calendar in the Tasks tab
+  const [dateMode, setDateMode] = useState<string | null>(null);
+  // Calendar saved state for context preservation
+  const calendarSavedState = useRef<CalendarSavedState | null>(null);
+
+  const refreshTasks = async () => {
+    if (calendarSavedState.current) {
+      calendarSavedState.current = {
+        ...calendarSavedState.current,
+        searchResults: null,
+        searchResultsVisible: true,
+        searchPage: 1,
+        highlightEventKey: null,
+        searchResultsScrollPos: 0,
+      };
+    }
+
+    try {
+      const latestTasks = await getTasks();
+      setTasks(latestTasks);
+    } catch (err) {
+      console.error('Failed to refresh tasks:', err);
+      throw err;
+    }
+  };
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof document === 'undefined') return 'light';
@@ -122,28 +155,22 @@ export default function TodoList({
     setEditingTaskDueDate('');
     setEditingTaskCategoryId(null);
 
-    if (currentTask.title !== trimmedTitle) {
-      const result = await updateTaskTitle(id, trimmedTitle);
+    try {
+      const result = await updateTaskDetails(id, {
+        title: trimmedTitle,
+        dueDate: newDueDate,
+        categoryId: editingTaskCategoryId,
+      });
+
       if (!result.ok) {
         setTasks(previousTasks);
         setActionError(result.error);
-        return;
+      } else {
+        setTasks(currentTasks => currentTasks.map(t => t.id === id ? result.data : t));
       }
-    }
-    if (currentTask.dueDate !== newDueDate) {
-      const result = await updateTaskDueDate(id, newDueDate);
-      if (!result.ok) {
-        setTasks(previousTasks);
-        setActionError(result.error);
-        return;
-      }
-    }
-    if (currentTask.categoryId !== editingTaskCategoryId) {
-      const result = await updateTaskCategory(id, editingTaskCategoryId);
-      if (!result.ok) {
-        setTasks(previousTasks);
-        setActionError(result.error);
-      }
+    } catch {
+      setTasks(previousTasks);
+      setActionError('Failed to update task details.');
     }
   };
 
@@ -173,13 +200,19 @@ export default function TodoList({
     setNewTaskTitle('');
     setNewTaskDueDate('');
 
-    const result = await addTask(newTask.title, newTask.categoryId, newTask.dueDate);
-    if (result.ok) {
-      setTasks(currentTasks => currentTasks.map(task => task.id === tempId ? result.data : task));
-    } else {
+    try {
+      const result = await addTask(newTask.title, newTask.categoryId, newTask.dueDate);
+      if (result.ok) {
+        setTasks(currentTasks => currentTasks.map(task => task.id === tempId ? result.data : task));
+      } else {
+        setTasks(previousTasks);
+        setNewTaskTitle(title);
+        setActionError(result.error);
+      }
+    } catch {
       setTasks(previousTasks);
       setNewTaskTitle(title);
-      setActionError(result.error);
+      setActionError('Failed to add task.');
     }
   };
 
@@ -201,10 +234,15 @@ export default function TodoList({
       return aCompleted ? 1 : -1;
     }));
 
-    const result = await toggleTask(id, !currentStatus);
-    if (!result.ok) {
+    try {
+      const result = await toggleTask(id, !currentStatus);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+      }
+    } catch {
       setTasks(previousTasks);
-      setActionError(result.error);
+      setActionError('Failed to update task.');
     }
   };
 
@@ -213,10 +251,15 @@ export default function TodoList({
     const previousTasks = tasks;
     setActionError(null);
     setTasks(tasks.filter(t => t.id !== id));
-    const result = await deleteTask(id);
-    if (!result.ok) {
+    try {
+      const result = await deleteTask(id);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+      }
+    } catch {
       setTasks(previousTasks);
-      setActionError(result.error);
+      setActionError('Failed to delete task.');
     }
   };
 
@@ -236,12 +279,17 @@ export default function TodoList({
     setFailingTaskId(null);
     setFailureReason('');
 
-    const result = currentTask.failureReason
-      ? await updateFailureReason(id, reason)
-      : await failTask(id, reason);
-    if (!result.ok) {
+    try {
+      const result = currentTask.failureReason
+        ? await updateFailureReason(id, reason)
+        : await failTask(id, reason);
+      if (!result.ok) {
+        setTasks(previousTasks);
+        setActionError(result.error);
+      }
+    } catch {
       setTasks(previousTasks);
-      setActionError(result.error);
+      setActionError('Failed to mark task as failed.');
     }
   };
 
@@ -531,278 +579,321 @@ export default function TodoList({
           </div>
         </div>
         <p className="subtitle">Focus on what matters today.</p>
-      </header>
 
-      {/* Stats Dashboard */}
-      <div className="stats-dashboard">
-        <div className="stats-info">
-          <span className="stats-count">
-            {completedTodayTasks} of {totalTodayTasks} completed today
-          </span>
-          <p className="stats-quote">
-            {getMotivationalText(completionPercentage)}
-          </p>
-        </div>
-        <div className="stats-progress-container">
-          <svg className="progress-ring" width="70" height="70">
-            {/* Background circle */}
-            <circle
-              className="progress-ring-bg"
-              stroke="rgba(255, 255, 255, 0.05)"
-              strokeWidth="5"
-              fill="transparent"
-              r="28"
-              cx="35"
-              cy="35"
-            />
-            {/* Active progress circle */}
-            <circle
-              className="progress-ring-bar"
-              stroke="var(--accent)"
-              strokeWidth="5"
-              strokeLinecap="round"
-              fill="transparent"
-              r="28"
-              cx="35"
-              cy="35"
-              style={{
-                strokeDasharray: 176,
-                strokeDashoffset: 176 - (176 * completionPercentage) / 100
-              }}
-            />
-          </svg>
-          <span className="progress-percentage">{completionPercentage}%</span>
-        </div>
-      </div>
-
-      {/* Category Section */}
-      <div className="category-section">
-        <div className="category-filters-container">
-          <div className="category-pills">
-            <button
-              type="button"
-              className={`filter-pill ${selectedFilterCategoryId === null ? 'active' : ''}`}
-              onClick={() => setSelectedFilterCategoryId(null)}
-            >
-              All
-            </button>
-            {categories.map(cat => (
-              <button
-                key={cat.id}
-                type="button"
-                className={`filter-pill ${selectedFilterCategoryId === cat.id ? 'active' : ''}`}
-                onClick={() => setSelectedFilterCategoryId(cat.id)}
-                style={{ '--pill-color': cat.color } as React.CSSProperties}
-              >
-                <span className="pill-dot" style={{ backgroundColor: cat.color }}></span>
-                {cat.name}
-              </button>
-            ))}
-          </div>
+        {/* Tab Switcher */}
+        <div className="tab-switcher">
           <button
             type="button"
-            className={`manage-categories-btn ${isManageDrawerOpen ? 'active' : ''}`}
-            onClick={() => setIsManageDrawerOpen(!isManageDrawerOpen)}
-            aria-label="Manage Categories"
+            className={`tab-btn ${activeTab === 'tasks' && !dateMode ? 'active' : ''}`}
+            onClick={() => { setActiveTab('tasks'); setDateMode(null); calendarSavedState.current = null; }}
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3"></circle>
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-            </svg>
+            Tasks
+          </button>
+          <button
+            type="button"
+            className={`tab-btn ${activeTab === 'calendar' ? 'active' : ''}`}
+            onClick={() => { setActiveTab('calendar'); setDateMode(null); calendarSavedState.current = null; }}
+          >
+            Calendar
           </button>
         </div>
+      </header>
 
-        {/* Manage Drawer */}
-        {isManageDrawerOpen && (
-          <div className="manage-drawer">
-            <div className="drawer-header">
-              <h3>Manage Categories</h3>
+      {/* Date Task List Mode */}
+      {dateMode && activeTab === 'tasks' ? (
+        <DateTaskList
+          dateStr={dateMode}
+          categories={categories}
+          onBack={() => {
+            setDateMode(null);
+            setActiveTab('calendar');
+          }}
+          refreshTasks={refreshTasks}
+        />
+      ) : activeTab === 'calendar' ? (
+        <CalendarView
+          categories={categories}
+          onOpenInTasks={(dateStr, state) => {
+            calendarSavedState.current = state;
+            setDateMode(dateStr);
+            setActiveTab('tasks');
+          }}
+          savedState={calendarSavedState.current}
+        />
+      ) : (
+        <>
+          {/* Stats Dashboard */}
+          <div className="stats-dashboard">
+            <div className="stats-info">
+              <span className="stats-count">
+                {completedTodayTasks} of {totalTodayTasks} completed today
+              </span>
+              <p className="stats-quote">
+                {getMotivationalText(completionPercentage)}
+              </p>
             </div>
+            <div className="stats-progress-container">
+              <svg className="progress-ring" width="70" height="70">
+                {/* Background circle */}
+                <circle
+                  className="progress-ring-bg"
+                  stroke="rgba(255, 255, 255, 0.05)"
+                  strokeWidth="5"
+                  fill="transparent"
+                  r="28"
+                  cx="35"
+                  cy="35"
+                />
+                {/* Active progress circle */}
+                <circle
+                  className="progress-ring-bar"
+                  stroke="var(--accent)"
+                  strokeWidth="5"
+                  strokeLinecap="round"
+                  fill="transparent"
+                  r="28"
+                  cx="35"
+                  cy="35"
+                  style={{
+                    strokeDasharray: 176,
+                    strokeDashoffset: 176 - (176 * completionPercentage) / 100
+                  }}
+                />
+              </svg>
+              <span className="progress-percentage">{completionPercentage}%</span>
+            </div>
+          </div>
 
-            <form onSubmit={handleAddCategory} className="new-category-form">
-              <input
-                type="text"
-                placeholder="New category..."
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                maxLength={15}
-              />
-              <div className="color-selector">
-                {premiumColors.map(color => (
+          {/* Category Section */}
+          <div className="category-section">
+            <div className="category-filters-container">
+              <div className="category-pills">
+                <button
+                  type="button"
+                  className={`filter-pill ${selectedFilterCategoryId === null ? 'active' : ''}`}
+                  onClick={() => setSelectedFilterCategoryId(null)}
+                >
+                  All
+                </button>
+                {categories.map(cat => (
                   <button
-                    key={color}
+                    key={cat.id}
                     type="button"
-                    className={`color-dot ${newCategoryColor === color ? 'selected' : ''}`}
-                    style={{ backgroundColor: color }}
-                    onClick={() => setNewCategoryColor(color)}
-                    aria-label={`Select color ${color}`}
-                  />
+                    className={`filter-pill ${selectedFilterCategoryId === cat.id ? 'active' : ''}`}
+                    onClick={() => setSelectedFilterCategoryId(cat.id)}
+                    style={{ '--pill-color': cat.color } as React.CSSProperties}
+                  >
+                    <span className="pill-dot" style={{ backgroundColor: cat.color }}></span>
+                    {cat.name}
+                  </button>
                 ))}
               </div>
-              <button type="submit" className="add-category-submit-btn">
-                Add
+              <button
+                type="button"
+                className={`manage-categories-btn ${isManageDrawerOpen ? 'active' : ''}`}
+                onClick={() => setIsManageDrawerOpen(!isManageDrawerOpen)}
+                aria-label="Manage Categories"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
               </button>
-            </form>
+            </div>
 
-            <div className="drawer-categories-list">
-              {categories.map(cat => (
-                <div key={cat.id} className="drawer-category-item">
-                  <div className="category-info">
-                    <span className="category-dot" style={{ backgroundColor: cat.color }}></span>
-                    <span className="category-name">{cat.name}</span>
-                    {!cat.isCustom && <span className="system-tag">Default</span>}
+            {/* Manage Drawer */}
+            {isManageDrawerOpen && (
+              <div className="manage-drawer">
+                <div className="drawer-header">
+                  <h3>Manage Categories</h3>
+                </div>
+
+                <form onSubmit={handleAddCategory} className="new-category-form">
+                  <input
+                    type="text"
+                    placeholder="New category..."
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    maxLength={15}
+                  />
+                  <div className="color-selector">
+                    {premiumColors.map(color => (
+                      <button
+                        key={color}
+                        type="button"
+                        className={`color-dot ${newCategoryColor === color ? 'selected' : ''}`}
+                        style={{ backgroundColor: color }}
+                        onClick={() => setNewCategoryColor(color)}
+                        aria-label={`Select color ${color}`}
+                      />
+                    ))}
                   </div>
-                  {cat.isCustom && (
-                    <button
-                      type="button"
-                      className="delete-category-btn"
-                      onClick={() => handleDeleteCategory(cat.id)}
-                      aria-label={`Delete ${cat.name} category`}
-                    >
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M3 6h18"></path>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                      </svg>
-                    </button>
-                  )}
+                  <button type="submit" className="add-category-submit-btn">
+                    Add
+                  </button>
+                </form>
+
+                <div className="drawer-categories-list">
+                  {categories.map(cat => (
+                    <div key={cat.id} className="drawer-category-item">
+                      <div className="category-info">
+                        <span className="category-dot" style={{ backgroundColor: cat.color }}></span>
+                        <span className="category-name">{cat.name}</span>
+                        {!cat.isCustom && <span className="system-tag">Default</span>}
+                      </div>
+                      {cat.isCustom && (
+                        <button
+                          type="button"
+                          className="delete-category-btn"
+                          onClick={() => handleDeleteCategory(cat.id)}
+                          aria-label={`Delete ${cat.name} category`}
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                          </svg>
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Task input form */}
-      <form onSubmit={handleAddTask} className="input-group">
-        <input
-          type="text"
-          placeholder="What needs to be done?"
-          value={newTaskTitle}
-          onChange={(e) => setNewTaskTitle(e.target.value)}
-        />
-        <button type="submit" className="add-btn">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <line x1="12" y1="5" x2="12" y2="19"></line>
-            <line x1="5" y1="12" x2="19" y2="12"></line>
-          </svg>
-        </button>
-      </form>
-
-      {actionError && (
-        <div className="action-error" role="alert">
-          {actionError}
-        </div>
-      )}
-
-      {/* Task Creation Metadata Controls */}
-      <div className="task-creation-controls">
-        {/* Category tagging */}
-        {categories.length > 0 && (
-          <div className="task-category-picker">
-            <span className="picker-label">Tag:</span>
-            <div className="picker-pills">
-              {categories.map(cat => (
-                <button
-                  key={cat.id}
-                  type="button"
-                  className={`picker-pill ${newTaskCategoryId === cat.id ? 'selected' : ''}`}
-                  style={{ '--pill-color': cat.color } as React.CSSProperties}
-                  onClick={() => setNewTaskCategoryId(cat.id)}
-                >
-                  <span className="pill-dot" style={{ backgroundColor: cat.color }}></span>
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Date Selector */}
-        <div className="task-date-picker">
-          <span className="picker-label">Due:</span>
-          <input
-            type="date"
-            className="creation-date-input"
-            value={newTaskDueDate}
-            onChange={(e) => setNewTaskDueDate(e.target.value)}
-            aria-label="Set due date"
-          />
-        </div>
-      </div>
-
-      {/* Task Sections */}
-      {filteredTasks.length === 0 ? (
-        <div className="empty-state">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-            <polyline points="22 4 12 14.01 9 11.01"></polyline>
-          </svg>
-          <p>{selectedFilterCategoryId === null ? "All caught up! You're good to go." : "No tasks in this category."}</p>
-        </div>
-      ) : (
-        <div className="task-sections">
-          {/* Today's Focus Section */}
-          {(filteredTodayTasks.length > 0 || filteredUpcomingTasks.length > 0) && (
-            <div className="task-section today-focus-section">
-              <div className="section-header">
-                <div className="section-title">
-                  <span>Today&apos;s Focus</span>
-                </div>
-                <span className="section-count">{activeFilteredTodayTasks.length}</span>
               </div>
+            )}
+          </div>
 
-              {activeFilteredTodayTasks.length === 0 ? (
-                <>
-                  <div className="today-empty-card">
-                    <span className="today-empty-icon">{filteredTodayTasks.length > 0 ? '🎉' : '☀️'}</span>
-                    <h4 className="today-empty-title">
-                      {filteredTodayTasks.length > 0 ? 'All caught up for today!' : 'No tasks for today'}
-                    </h4>
-                    <p className="today-empty-subtitle">
-                      {selectedFilterCategoryId !== null
-                        ? "No tasks due today in this tag. Keep up the great work!"
-                        : filteredTodayTasks.length > 0
-                          ? "Outstanding! You crushed all your goals today. Enjoy your day!"
-                          : "Nothing scheduled for today. Add a task or enjoy a free day!"}
-                    </p>
+          {/* Task input form */}
+          <form onSubmit={handleAddTask} className="input-group">
+            <input
+              type="text"
+              placeholder="What needs to be done?"
+              value={newTaskTitle}
+              onChange={(e) => setNewTaskTitle(e.target.value)}
+            />
+            <button type="submit" className="add-btn">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+          </form>
+
+          {actionError && (
+            <div className="action-error" role="alert">
+              {actionError}
+            </div>
+          )}
+
+          {/* Task Creation Metadata Controls */}
+          <div className="task-creation-controls">
+            {/* Category tagging */}
+            {categories.length > 0 && (
+              <div className="task-category-picker">
+                <span className="picker-label">Tag:</span>
+                <div className="picker-pills">
+                  {categories.map(cat => (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      className={`picker-pill ${newTaskCategoryId === cat.id ? 'selected' : ''}`}
+                      style={{ '--pill-color': cat.color } as React.CSSProperties}
+                      onClick={() => setNewTaskCategoryId(cat.id)}
+                    >
+                      <span className="pill-dot" style={{ backgroundColor: cat.color }}></span>
+                      {cat.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Date Selector */}
+            <div className="task-date-picker">
+              <span className="picker-label">Due:</span>
+              <input
+                type="date"
+                className="creation-date-input"
+                value={newTaskDueDate}
+                onChange={(e) => setNewTaskDueDate(e.target.value)}
+                aria-label="Set due date"
+              />
+            </div>
+          </div>
+
+          {/* Task Sections */}
+          {filteredTasks.length === 0 ? (
+            <div className="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+              </svg>
+              <p>{selectedFilterCategoryId === null ? "All caught up! You're good to go." : "No tasks in this category."}</p>
+            </div>
+          ) : (
+            <div className="task-sections">
+              {/* Today's Focus Section */}
+              {(filteredTodayTasks.length > 0 || filteredUpcomingTasks.length > 0) && (
+                <div className="task-section today-focus-section">
+                  <div className="section-header">
+                    <div className="section-title">
+                      <span>Today&apos;s Focus</span>
+                    </div>
+                    <span className="section-count">{activeFilteredTodayTasks.length}</span>
                   </div>
-                  {completedFilteredTodayTasks.length > 0 && (
-                    <ul className="task-list" style={{ marginTop: '0.75rem' }}>
-                      {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
-                    </ul>
+
+                  {activeFilteredTodayTasks.length === 0 ? (
+                    <>
+                      <div className="today-empty-card">
+                        <span className="today-empty-icon">{filteredTodayTasks.length > 0 ? '🎉' : '☀️'}</span>
+                        <h4 className="today-empty-title">
+                          {filteredTodayTasks.length > 0 ? 'All caught up for today!' : 'No tasks for today'}
+                        </h4>
+                        <p className="today-empty-subtitle">
+                          {selectedFilterCategoryId !== null
+                            ? "No tasks due today in this tag. Keep up the great work!"
+                            : filteredTodayTasks.length > 0
+                              ? "Outstanding! You crushed all your goals today. Enjoy your day!"
+                              : "Nothing scheduled for today. Add a task or enjoy a free day!"}
+                        </p>
+                      </div>
+                      {completedFilteredTodayTasks.length > 0 && (
+                        <ul className="task-list" style={{ marginTop: '0.75rem' }}>
+                          {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                        </ul>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <ul className="task-list">
+                        {activeFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                      </ul>
+                      {completedFilteredTodayTasks.length > 0 && (
+                        <ul className="task-list" style={{ marginTop: '0.75rem' }}>
+                          {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                        </ul>
+                      )}
+                    </>
                   )}
-                </>
-              ) : (
-                <>
+                </div>
+              )}
+
+              {/* Upcoming Section */}
+              {filteredUpcomingTasks.length > 0 && (
+                <div className="task-section upcoming-section">
+                  <div className="section-header">
+                    <div className="section-title">
+                      <span>Upcoming</span>
+                    </div>
+                    <span className="section-count">{filteredUpcomingTasks.length}</span>
+                  </div>
+
                   <ul className="task-list">
-                    {activeFilteredTodayTasks.map((task) => renderTaskItem(task))}
+                    {filteredUpcomingTasks.map((task) => renderTaskItem(task))}
                   </ul>
-                  {completedFilteredTodayTasks.length > 0 && (
-                    <ul className="task-list" style={{ marginTop: '0.75rem' }}>
-                      {completedFilteredTodayTasks.map((task) => renderTaskItem(task))}
-                    </ul>
-                  )}
-                </>
+                </div>
               )}
             </div>
           )}
-
-          {/* Upcoming Section */}
-          {filteredUpcomingTasks.length > 0 && (
-            <div className="task-section upcoming-section">
-              <div className="section-header">
-                <div className="section-title">
-                  <span>Upcoming</span>
-                </div>
-                <span className="section-count">{filteredUpcomingTasks.length}</span>
-              </div>
-
-              <ul className="task-list">
-                {filteredUpcomingTasks.map((task) => renderTaskItem(task))}
-              </ul>
-            </div>
-          )}
-        </div>
+        </>
       )}
     </>
   );

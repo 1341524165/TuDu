@@ -117,3 +117,8 @@ DROP POLICY IF EXISTS "Users can delete their own tasks" ON tasks;
 CREATE POLICY "Users can delete their own tasks"
 ON tasks FOR DELETE
 USING (auth.uid() = user_id);
+
+-- Calendar event query indexes (idempotent)
+CREATE INDEX IF NOT EXISTS idx_tasks_user_createdat ON tasks (user_id, "createdAt");
+CREATE INDEX IF NOT EXISTS idx_tasks_user_duedate ON tasks (user_id, "dueDate");
+CREATE INDEX IF NOT EXISTS idx_tasks_user_completedat ON tasks (user_id, "completedAt");

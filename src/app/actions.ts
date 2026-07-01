@@ -114,12 +114,12 @@ export async function getTasks(): Promise<Task[]> {
     .order('completed', { ascending: true })
     .order('createdAt', { ascending: false });
 
-  if (error || !data) {
+  if (error) {
     console.error('Failed to fetch tasks:', error);
-    return [];
+    throw new Error(formatDatabaseError(error, 'Failed to fetch tasks.'));
   }
 
-  return data.map(mapTask);
+  return (data || []).map(mapTask);
 }
 
 export async function addTask(title: string, categoryId: number | null, dueDate: string | null = null): Promise<ActionResult<Task>> {
@@ -292,40 +292,60 @@ export async function deleteCategory(id: number): Promise<ActionResult> {
   return { ok: true, data: undefined };
 }
 
-export async function updateTaskTitle(id: number, title: string): Promise<ActionResult> {
-  if (!title || title.trim() === '') return { ok: false, error: 'Task title is required.' };
+export async function updateTaskDetails(
+  id: number,
+  details: { title: string; dueDate: string | null; categoryId: number | null }
+): Promise<ActionResult<Task>> {
+  if (!Number.isSafeInteger(id) || id <= 0 || !details || typeof details.title !== 'string') {
+    return { ok: false, error: 'Invalid task details.' };
+  }
+  if (details.categoryId !== null
+      && (!Number.isSafeInteger(details.categoryId) || details.categoryId <= 0)) {
+    return { ok: false, error: 'Invalid category.' };
+  }
+  if (details.dueDate !== null && typeof details.dueDate !== 'string') {
+    return { ok: false, error: 'Invalid date format.' };
+  }
+
+  const title = details.title.trim();
+  if (!title) return { ok: false, error: 'Task title is required.' };
+
+  if (details.dueDate) {
+    const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+    const [year, month, day] = details.dueDate.split('-').map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    if (!DATE_REGEX.test(details.dueDate)
+        || date.getUTCFullYear() !== year
+        || date.getUTCMonth() !== month - 1
+        || date.getUTCDate() !== day) {
+      return { ok: false, error: 'Invalid date format.' };
+    }
+  }
+
   const supabase = await createClient();
   const { user, error: authError } = await getCurrentUser(supabase);
   if (!user) return { ok: false, error: authError || 'Please sign in again.' };
 
-  const { error } = await supabase.from('tasks').update({ title: title.trim() }).eq('id', id);
-  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
-  revalidatePath('/');
-  return { ok: true, data: undefined };
-}
-
-export async function updateTaskDueDate(id: number, dueDate: string | null): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { user, error: authError } = await getCurrentUser(supabase);
-  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
-
-  const { error } = await supabase.from('tasks').update({ dueDate }).eq('id', id);
-  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task.') };
-  revalidatePath('/');
-  return { ok: true, data: undefined };
-}
-
-export async function updateTaskCategory(id: number, categoryId: number | null): Promise<ActionResult> {
-  const supabase = await createClient();
-  const { user, error: authError } = await getCurrentUser(supabase);
-  if (!user) return { ok: false, error: authError || 'Please sign in again.' };
-  const categoryError = await validateCategoryAccess(supabase, categoryId);
+  const categoryError = await validateCategoryAccess(supabase, details.categoryId);
   if (categoryError) return { ok: false, error: categoryError };
 
-  const { error } = await supabase.from('tasks').update({ categoryId }).eq('id', id);
-  if (error) return { ok: false, error: formatDatabaseError(error, 'Failed to update task tag.') };
+  const { data, error } = await supabase
+    .from('tasks')
+    .update({
+      title,
+      dueDate: details.dueDate,
+      categoryId: details.categoryId,
+    })
+    .eq('id', id)
+    .select('*, categories(name, color)')
+    .single();
+
+  if (error || !data) {
+    return { ok: false, error: formatDatabaseError(error || {}, 'Failed to update task details.') };
+  }
+
   revalidatePath('/');
-  return { ok: true, data: undefined };
+  return { ok: true, data: mapTask(data) };
 }
 
 export async function logout() {
